@@ -1,5 +1,5 @@
 // api/_store.js — Fresko-style global snapshot in Firestore
-// Collections: joolry_meta/{snapshot,sync}  joolry_snap/{version}_{i}
+// Collections: kbndesigns_meta/{snapshot,sync}  kbndesigns_snap/{version}_{i}
 // v2: compare-and-swap saves (no lost updates when many users write at once),
 //     no orphan chunks, background chunk cleanup, safe reload when a chunk vanished.
 const zlib = require('zlib');
@@ -32,7 +32,7 @@ function db() {
 
 function setDb(d) { _db = d; _mem = { version: null, data: null }; }
 
-const metaRef = (id) => db().collection('joolry_meta').doc(id);
+const metaRef = (id) => db().collection('kbndesigns_meta').doc(id);
 
 async function getMeta() {
   const s = await metaRef('snapshot').get();
@@ -54,7 +54,7 @@ async function markDirty() {
   await metaRef('sync').set({ dirty: true, dirtyAt: Date.now() }, { merge: true });
 }
 
-const chunkRef = (version, i) => db().collection('joolry_snap').doc(version + '_' + i);
+const chunkRef = (version, i) => db().collection('kbndesigns_snap').doc(version + '_' + i);
 const dropChunks = (version, n) =>
   Promise.all(Array.from({ length: n || 0 }, (_, i) => chunkRef(version, i).delete().catch(() => {})));
 
