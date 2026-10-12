@@ -18,7 +18,7 @@
       ]
     },
     {
-      "source": "/(app\\.js|app\\.css|core\\.js|appconfig\\.js|sw\\.js|index\\.html)",
+      "source": "/(app\\.js|app\\.css|core\\.js|appconfig\\.js|sw\\.js|index\\.html|manifest\\.json)",
       "headers": [
         {
           "key": "Cache-Control",
