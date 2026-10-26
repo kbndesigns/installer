@@ -5,21 +5,21 @@
   <meta charset="UTF-8">
   <meta name="viewport"
     content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-  <meta name="theme-color" content="#111111">
+  <meta name="theme-color" content="#3B82F6">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="KBN Designs TaskApp">
+  <meta name="apple-mobile-web-app-title" content="KBN TaskApp">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" href="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26">
   <link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26">
   <link rel="shortcut icon" href="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26">
-  <title>KBN Designs TaskApp</title>
+  <title>KBN TaskApp</title>
 
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://lh3.googleusercontent.com">
+  <link rel="preconnect" href="https://kbndesigns.com">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <!-- External Assets -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -29,13 +29,18 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
   <!-- ── App Config: GAS_URL aur constants — sirf yahan change karo ── -->
   <script src="appconfig.js"></script>
+  
+  <!-- Firebase client — live ver listener (Phase 2) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
+  
   <!-- ── App Core: GAS bridge + date/string utilities ── -->
   <script src="app.js"></script>
   <!-- Early session check: prevents login screen flash when valid session exists -->
   <script>
     (function () {
       try {
-        var raw = localStorage.getItem('kbn_session_v1');
+        var raw = localStorage.getItem('kbndesigns_session_v1');
         if (raw) {
           var s = JSON.parse(raw);
           var validName = s && s.user && s.user.name && s.user.name !== 'User' && s.user.name !== 'Staff' && s.user.name.trim() !== '';
@@ -60,30 +65,32 @@
 ═══════════════════════════════════════════════════════════ -->
   <div class="scr on" id="sLogin">
     <div class="login-grid"></div>
+
+    <!-- Mobile top brand (small screens only — CSS handles hide/show) -->
     <div class="l-mob-brand">
-      <div
-        style="background:#fff;border-radius:20px;padding:12px 20px;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.18);margin-bottom:4px">
-        <img src="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26"
-          style="width:100px;height:44px;object-fit:contain;display:block"
-          onerror="this.parentElement.innerHTML='<span style=\'font-size:22px;font-weight:900;color:#111111;letter-spacing:-1px\'>KBN</span>'">
+      <div class="l-mob-logo">
+        <img src="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26" alt="KBN Designs"
+          onerror="this.parentElement.innerHTML='<span class=\'l-mob-txt\'>KBN Designs</span>'">
       </div>
-      <div style="color:#fff;font-size:22px;font-weight:900;margin-top:16px;letter-spacing:-.3px">KBN Designs TaskApp</div>
-      <div style="color:rgba(255,255,255,.9);font-size:13px;font-weight:700;margin-top:8px;letter-spacing:.2em">KBN DESIGNS</div>
     </div>
+
     <div class="lbox">
       <div class="l-logo-wrap" id="lDeskLogo">
-        <img src="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26" alt="KBN Designs Logo"
+        <img src="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26" alt="KBN Designs"
           onerror="this.style.display='none';document.getElementById('lgFallback').style.display='flex'">
-        <div class="l-logo-fallback" id="lgFallback" style="display:none">KD</div>
+        <div class="l-logo-fallback" id="lgFallback" style="display:none">JL</div>
       </div>
-      <div class="l-title">KBN Designs TaskApp</div>
-      <div class="l-sub" style="letter-spacing:.2em;font-weight:700">KBN DESIGNS</div>
+
+      <div class="l-title">Welcome back</div>
+      <div class="l-sub">Sign in to continue</div>
+
       <div class="l-field">
-        <label>Email Address</label>
+        <label>Email</label>
         <input type="email" id="femail" placeholder="you@kbndesigns.com" autocomplete="email"
           onkeydown="if(event.key==='Enter')document.getElementById('fpass').focus()">
         <span class="l-ico"><i class="fas fa-envelope"></i></span>
       </div>
+
       <div class="l-field">
         <label>Password</label>
         <input type="password" id="fpass" placeholder="••••••••" autocomplete="current-password"
@@ -95,11 +102,12 @@
           <i class="fas fa-eye"></i>
         </button>
       </div>
+
       <button class="l-btn" id="btnLogin" onclick="_doLogin()">
-        <i class="fas fa-sign-in-alt"></i> Sign In
+        Sign In
       </button>
       <div class="l-err" id="loginErr"></div>
-      <div class="l-footer">KBN Designs TaskApp &nbsp;&bull;&nbsp; All rights reserved &copy; 2026</div>
+      <div class="l-footer">© KBN Designs</div>
     </div>
   </div>
 
@@ -119,14 +127,14 @@
         <div style="position:absolute;inset:0;border-radius:50%;background:#fff;box-shadow:0 4px 20px rgba(0,0,0,.15)">
         </div>
         <div
-          style="position:absolute;inset:-5px;border-radius:50%;border:3.5px solid transparent;border-top-color:#111111;border-right-color:#C4A35A;animation:fkLogoSpin .9s linear infinite">
+          style="position:absolute;inset:-5px;border-radius:50%;border:3.5px solid transparent;border-top-color:#111111;border-right-color:#B76E79;animation:fkLogoSpin .9s linear infinite">
         </div>
         <img src="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26" alt="KBN Designs"
           style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:14px;border-radius:50%"
           onerror="this.style.display='none'">
       </div>
       <div style="color:#fff;font-size:22px;font-weight:900;letter-spacing:-.4px;text-align:center;
-        text-shadow:0 2px 12px rgba(0,0,0,.2)">KBN Designs TaskApp</div>
+        text-shadow:0 2px 12px rgba(0,0,0,.2)">KBN TaskApp</div>
       <div id="fkSplashMsg" style="color:rgba(255,255,255,.8);font-size:13.5px;font-weight:600;
         text-align:center;letter-spacing:.2px;margin-top:4px">Loading your workspace…</div>
       <div style="display:flex;gap:6px;margin-top:12px">
@@ -246,7 +254,7 @@
       </nav>
 
       <div class="sb-ft">
-        <div class="sb-ft-txt">KBN Designs TaskApp</div>
+        <div class="sb-ft-txt">KBN TaskApp</div>
         <div class="sb-ft-copy">&copy; 2026 KBN Designs. All rights reserved.</div>
       </div>
     </aside>
@@ -288,6 +296,12 @@
           <!-- Refresh current view -->
           <button class="ico-btn" onclick="_refresh()" title="Refresh page">
             <i class="fas fa-rotate-right"></i>
+          </button>
+          <!-- Manager: clear GAS cache + force Firebase snapshot -->
+          <button class="ico-btn" id="tbCacheBtn" onclick="_forcePortalCacheClear()"
+            title="Clear server cache & push latest sheet data to Firebase"
+            style="display:none">
+            <i class="fas fa-cloud-arrow-down" id="tbCacheIco"></i>
           </button>
         </div>
       </header>
