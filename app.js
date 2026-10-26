@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════════════
-// app.js — Joolry Daily v4.2
+// app.js — KBN TaskApp v4.2
 // Core utilities: date parsing, formatting, GAS bridge, session, CSV download
 // Load order: appconfig.js → app.js → index.html inline script
 // ════════════════════════════════════════════════════════════════════════════
@@ -164,7 +164,7 @@
   };
 
   // ── Session ───────────────────────────────────────────────────────────────
-  var SK = (W.APP_CONFIG&&W.APP_CONFIG.SESSION_KEY)||'joolry_session_v1';
+  var SK = (W.APP_CONFIG&&W.APP_CONFIG.SESSION_KEY)||'kbndesigns_session_v1';
   var SH = (W.APP_CONFIG&&W.APP_CONFIG.SESSION_HOURS)||12;
   W._saveSession = function(u,t){ try{ localStorage.setItem(SK,JSON.stringify({user:u,token:t,exp:Date.now()+SH*3600000})); }catch(e){} };
   W._loadSession = function(){ try{ var r=localStorage.getItem(SK); if(!r) return null; var s=JSON.parse(r); return (s&&s.user&&s.token&&Date.now()<(s.exp||0))?s:null; }catch(e){return null;} };
