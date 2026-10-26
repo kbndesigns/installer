@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════════════════
-// appconfig.js — KBN Designs TaskApp
+// appconfig.js — KBN TaskApp
 // ─────────────────────────────────────────────────────────────────────────
 // SIRF YAHAN GAS_URL CHANGE KARO — index.html ya app.js mein kuch nahi
 // ════════════════════════════════════════════════════════════════════════════
@@ -12,13 +12,13 @@ window.APP_CONFIG = {
   GAS_URL: '',   // not used any more — browser talks to /api/rpc only
 
   // ── App Info ────────────────────────────────────────────────────────────
-  APP_NAME:    'KBN Designs TaskApp',
+  APP_NAME:    'KBN TaskApp',
   APP_VERSION: '1.0',
   APP_COMPANY: 'KBN Designs',
 
   // ── Session ─────────────────────────────────────────────────────────────
-  SESSION_KEY:     'kbn_session_v1',
-  SESSION_HOURS:   12,    // overridden by AppConfig from server
+  SESSION_KEY:     'kbndesigns_session_v1',
+  SESSION_HOURS:   168,   // 7 days; can still override via AppConfig sheet
 
   // ── API Timeouts ─────────────────────────────────────────────────────────
   DEFAULT_TIMEOUT: 30000,   // 30s
@@ -31,3 +31,17 @@ window.APP_CONFIG = {
 
 // Convenience shortcut — app.js uses window.GAS_URL
 window.GAS_URL = window.APP_CONFIG.GAS_URL;
+
+
+// Firebase client (Phase 2 live version) — Project settings → Web app se bharo
+window.FIREBASE_WEB = {
+  apiKey: 'PASTE_API_KEY',
+  authDomain: 'YOUR_PROJECT.firebaseapp.com',
+  projectId: 'YOUR_PROJECT_ID',
+  storageBucket: 'YOUR_PROJECT.appspot.com',
+  messagingSenderId: 'PASTE',
+  appId: 'PASTE'
+};
+
+
+
