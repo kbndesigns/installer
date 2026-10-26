@@ -3,7 +3,7 @@
 // /api/* and script.google.com: never cached. BUMP `CACHE` ON EVERY DEPLOY.
 const CACHE = 'kbn-v33-20261013';
 const SHELL = ['./', './index.html', './app.js', './appconfig.js', './app.css', './core.js', './manifest.json'];
-const CDN = ['cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com', 'lh3.googleusercontent.com'];
+const CDN = ['cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 
 self.addEventListener('install', function (e) {
   self.skipWaiting();
