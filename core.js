@@ -5,14 +5,14 @@
     var _U = null;   // Current logged-in user object from GAS
 
     // ── Session persistence helpers ───────────────────────────────────────────
-    var _SESSION_KEY = 'joolry_session_v1';
+    var _SESSION_KEY = 'kbndesigns_session_v1';
     // Uses localStorage so session survives page refresh AND tab close
     // Expiry enforced client-side; sign-out always clears it
     function _saveSession(user, token) {
       try {
-        var sessionHours = 12;
+           var sessionHours = 168; // 7 days default
         try {
-          var sh = parseInt(localStorage.getItem('joolry_session_hours') || '');
+          var sh = parseInt(localStorage.getItem('kbndesigns_session_hours') || '');
           if (!isNaN(sh) && sh > 0) sessionHours = sh;
         } catch (e) { }
         var exp = Date.now() + sessionHours * 3600 * 1000;
@@ -118,35 +118,128 @@
       try {localStorage.removeItem(_LC_KEY);} catch (e) { }
     }
 
-    var _refreshTimer = null;   // background auto-refresh interval handle
-    var _AUTO_REFRESH_MS = 90000; // 90s — balance between freshness and GAS quota
+    var _refreshTimer = null;
+    var _AUTO_REFRESH_MS = 30000; // backup poll 30s (listener primary)
+    var _liveVer = null;
+    var _liveBusy = false;
+    var _fsUnsub = null;          // Firestore onSnapshot unsubscribe
 
-    // Background refresh — fetches only the lightweight dashboard data so
-    // changes in Google Sheets (task updates, delegation status, announcements)
-    // appear automatically without the user having to manually reload.
     function _startAutoRefresh() {
       _stopAutoRefresh();
+      _startLiveListener();       // primary: instant
+      _pollLiveVer(true);         // seed + backup
       _refreshTimer = setInterval(function () {
-        if (document.hidden) return; // skip when tab is in background
-        _gas('getDashboardStatsFresh', [], function (d) {
-          if (!d) {_hideSplash(); _loadV('dash'); return;}
-          if (d.dashStats) _D.dashStats = d.dashStats;
-          if (d.todayAtt) _D.todayAtt = d.todayAtt;
-          if (d.announcements) _D.announcements = d.announcements;
-          if (d.myDelegations) _D.myDelegations = d.myDelegations;
-          _D.lastFetch = Date.now(); _lcSave();
-          // If currently on the dashboard, silently re-render the KPI strip
-          var cur = window._curView || '';
-          if (cur === 'dash') {
-            var kpiEl = document.getElementById('dashKpi');
-            if (kpiEl && d.dashStats) _renderDashKpi(d.dashStats);
-          }
-        }, function () { }); // silent fail — will retry next interval
+        if (document.hidden) return;
+        _pollLiveVer(false);
       }, _AUTO_REFRESH_MS);
     }
 
     function _stopAutoRefresh() {
-      if (_refreshTimer) {clearInterval(_refreshTimer); _refreshTimer = null;}
+      if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
+      if (_fsUnsub) {
+        try { _fsUnsub(); } catch (e) { }
+        _fsUnsub = null;
+      }
+    }
+
+    /** Primary: Firestore onSnapshot on _meta/state.ver */
+    function _startLiveListener() {
+      if (_fsUnsub) {
+        try { _fsUnsub(); } catch (e) { }
+        _fsUnsub = null;
+      }
+      try {
+        if (typeof firebase === 'undefined' || !window.FIREBASE_WEB || !window.FIREBASE_WEB.apiKey) {
+          return; // config missing → poll-only
+        }
+        if (window.FIREBASE_WEB.apiKey.indexOf('PASTE') === 0) return;
+
+        if (!firebase.apps || !firebase.apps.length) {
+          firebase.initializeApp(window.FIREBASE_WEB);
+        }
+        var db = firebase.firestore();
+        _fsUnsub = db.collection('_meta').doc('state').onSnapshot(
+          function (snap) {
+            if (!snap || !snap.exists) return;
+            var v = snap.data().ver;
+            if (v == null) return;
+            // Firestore may return number; normalize
+            v = typeof v === 'object' && v.toMillis ? v : Number(v);
+            if (_liveVer === null) {
+              _liveVer = v;
+              return;
+            }
+            if (v !== _liveVer) {
+              _liveVer = v;
+              _onLiveDataChange();
+            }
+          },
+          function (err) {
+            // Permission / network — keep poll backup
+            console.warn('[live] firestore listen failed', err && err.message);
+          }
+        );
+      } catch (e) {
+        console.warn('[live] init failed', e && e.message);
+      }
+    }
+
+    function _pollLiveVer(isSeed) {
+      fetch('/api/ver', { method: 'GET', cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || j.on === false) return;
+          var v = j.ver;
+          if (v == null) return;
+          if (isSeed || _liveVer === null) {
+            _liveVer = v;
+            return;
+          }
+          if (v !== _liveVer) {
+            _liveVer = v;
+            _onLiveDataChange();
+          }
+        })
+        .catch(function () { });
+    }
+
+    function _onLiveDataChange() {
+      if (_liveBusy) return;
+      _liveBusy = true;
+      try {
+        if (typeof _rcClear === 'function') _rcClear(false);
+        delete _D.dashStats; delete _D.todayAtt; delete _D.todayTasks;
+        delete _D.announcements; delete _D.myDelegations; delete _D.myAtt;
+        delete _D.myAttendance; delete _D.lastFetch;
+        delete _D.weekTasks; delete _D._ckWeekKey;
+        delete _D.teamChecklist; delete _D._ckTeamKey;
+        delete _D.histLogs; delete _D._ckHistKey;
+        delete _D._ckTodayKey;
+        if (typeof _teamAttData !== 'undefined') _teamAttData = null;
+        window._tsAllTasks = null;
+      } catch (e) { }
+
+      var cur = window._curView || 'dash';
+      try {
+        if (typeof _loadV === 'function') _loadV(cur);
+      } catch (e2) { }
+
+      try {
+        _gas('getAnnouncements', [], function (anns) {
+          var badge = document.getElementById('annBadge');
+          if (badge) {
+            if (anns && anns.length > 0) {
+              badge.textContent = anns.length;
+              badge.style.display = '';
+            } else {
+              badge.style.display = 'none';
+            }
+          }
+          _D.announcements = anns || [];
+        }, function () { });
+      } catch (e3) { }
+
+      setTimeout(function () { _liveBusy = false; }, 1200);
     }
 
     // Hard refresh — clears in-memory _D (forces fresh server fetch on next
@@ -888,7 +981,7 @@
       try {
         var sbNm = document.getElementById('sbName');
         var sbRl = document.getElementById('sbRole');
-        var nm = (_U && _U.name && _U.name !== 'User' && _U.name !== 'Staff' && _U.name.trim() !== '') ? _U.name : (sbNm && sbNm.textContent && sbNm.textContent !== 'Joolry Staff' ? sbNm.textContent : '');
+        var nm = (_U && _U.name && _U.name !== 'User' && _U.name !== 'Staff' && _U.name.trim() !== '') ? _U.name : (sbNm && sbNm.textContent && sbNm.textContent !== 'KBN Staff' ? sbNm.textContent : '');
         var rl = (_U && _U.role) ? (_U.role + ' · ' + (_U.dept || '')) : (sbRl && sbRl.textContent ? sbRl.textContent : 'Staff');
         if (!nm || nm.trim() === '') nm = 'Staff Member';
         var n = document.getElementById('soUserName'), r = document.getElementById('soUserDept');
@@ -906,7 +999,7 @@
       document.body.style.overflow = '';
     }
     function _signOut() {
-      try {_rcClear(true); _clearSession(); localStorage.removeItem('joolry_session_v1'); sessionStorage.clear();} catch (e) { }
+      try {_rcClear(true); _clearSession(); localStorage.removeItem('kbndesigns_session_v1'); sessionStorage.clear();} catch (e) { }
       _U = null; _TOKEN = null;
       window._fkLoaded = false;
       document.documentElement.classList.remove('has-session');
@@ -933,7 +1026,7 @@
       // Reset sidebar to defaults for next login
       try {
         var sbn = document.getElementById('sbName'), sbr = document.getElementById('sbRole'), sbi = document.getElementById('sbAvaInitials');
-        if (sbn) sbn.textContent = 'Joolry Staff'; if (sbr) sbr.textContent = 'Staff'; if (sbi) sbi.textContent = '?';
+        if (sbn) sbn.textContent = 'KBN Staff'; if (sbr) sbr.textContent = 'Staff'; if (sbi) sbi.textContent = '?';
       } catch (e) { }
       setTimeout(function () {
         var em = document.getElementById('femail'), pw = document.getElementById('fpass'), er = document.getElementById('loginErr');
@@ -1138,13 +1231,21 @@
       }).then(function (r) {return r.json();}).then(function (data) {
         clearTimeout(tm); _lbHide();
         if (data && data.error === 'NOT_AUTHENTICATED') {
-          try {localStorage.removeItem('joolry_session_v1');} catch (e) { }
+          try {localStorage.removeItem('kbndesigns_session_v1');} catch (e) { }
           location.reload(); return;
         }
         if (data && data.success === false && data.error) {
           if (onErr) onErr({message: data.error}); else _toast('Error: ' + data.error, 'err');
-        } else {
+                      } else {
           if (_isW) _rcClear(false); else _rcPut(fn, args, data);
+          // Own write → force clients to pick up new ver soon + soft self refresh
+          if (_isW) {
+            try {
+              _liveVer = null; // next poll treats any ver as change
+              setTimeout(function () { _pollLiveVer(false); }, 600);
+            } catch (eW) { }
+          }
+          try { if (_U && _TOKEN) _saveSession(_U, _TOKEN); } catch (eTouch) { }
           if (onOk) onOk(data);
         }
       }).catch(function () {
@@ -1453,7 +1554,7 @@
               '<div style="position:relative;width:88px;height:88px;margin-bottom:22px">' +
               '<div style="position:absolute;inset:0;border-radius:50%;background:#fff;box-shadow:0 4px 20px rgba(0,0,0,.12)"></div>' +
               '<div style="position:absolute;inset:-5px;border-radius:50%;border:3.5px solid transparent;border-top-color:#111111;border-right-color:#B76E79;animation:fkLogoSpin .9s linear infinite"></div>' +
-              '<img src="https://joolry.in/cdn/shop/files/Joolry_Logo_160x.png?v=1661766461" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:13px;border-radius:50%" onerror="this.style.display=\'none\'">' +
+              '<img src="https://lh3.googleusercontent.com/d/1H_eLljrOQ03gk1CXoB_odFrtjOdjTW26" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:13px;border-radius:50%" onerror="this.style.display=\'none\'">' +
               '</div>' +
               '<div style="font-size:16px;font-weight:800;color:var(--tx);margin-bottom:6px">Loading your workspace...</div>' +
               '<div id="_fkTip" style="font-size:13px;color:var(--tx2);min-height:18px;transition:opacity .3s;padding:0 16px;line-height:1.5">' + tips[0] + '</div>' +
@@ -1474,7 +1575,7 @@
 
       window._fkSplashHardTimer = setTimeout(function () {
         if (window._fkLoaded) return;
-        console.warn('[Joolry] Splash hard-timeout 32s — forcing retry UI');
+        console.warn('[KBN Designs] Splash hard-timeout 32s — forcing retry UI');
         window._fkBootFailed = true;          // soft tip ko block karo
         if (window._fkTipTimer) {clearInterval(window._fkTipTimer); window._fkTipTimer = null;}
 
@@ -1532,6 +1633,9 @@
       if (_isManager()) {
         var mgrNav = document.getElementById('mgrNav');
         if (mgrNav) mgrNav.style.display = '';
+        // Show global Clear Cache / Sync button in topbar
+        var tbCache = document.getElementById('tbCacheBtn');
+        if (tbCache) tbCache.style.display = '';
       }
       if (_dark) {
         var darkIco = document.getElementById('darkIco');
@@ -1580,7 +1684,7 @@
           _D.appConfig = d.appConfig;
           if (d.appConfig.SESSION_HOURS) {
             try {
-              localStorage.setItem('joolry_session_hours', String(parseInt(d.appConfig.SESSION_HOURS, 10) || 12));
+              localStorage.setItem('kbndesigns_session_hours', String(parseInt(d.appConfig.SESSION_HOURS, 10) || 12));
             } catch (e) { }
           }
           if (_U && _TOKEN) _saveSession(_U, _TOKEN);
@@ -1670,7 +1774,7 @@
         _D.appConfig = cfg;
         if (cfg.SESSION_HOURS) {
           try {
-            localStorage.setItem('joolry_session_hours', String(parseInt(cfg.SESSION_HOURS, 10) || 12));
+            localStorage.setItem('kbndesigns_session_hours', String(parseInt(cfg.SESSION_HOURS, 10) || 12));
           } catch (e) { }
         }
         if (_U && _TOKEN) _saveSession(_U, _TOKEN);
@@ -1879,6 +1983,72 @@
 
     function _refresh() {
       _forceRefresh();
+    }
+
+    /**
+     * Manager/Owner only: clear GAS caches + force Vercel snapshot → Firebase,
+     * then clear local caches and reload current view.
+     */
+    function _forcePortalCacheClear() {
+      if (!_isManager()) {
+        _toast('Only managers can sync portal cache', 'warn');
+        return;
+      }
+      var btn = document.getElementById('tbCacheBtn');
+      var ico = document.getElementById('tbCacheIco');
+      if (btn && btn.disabled) return;
+      if (btn) {
+        btn.disabled = true;
+        if (ico) ico.className = 'fas fa-spinner fa-spin';
+      }
+      _toast('Clearing cache + updating Firebase…', 'info');
+
+      // Local browser caches
+      try {
+        delete _D.dashStats; delete _D.todayAtt; delete _D.todayTasks;
+        delete _D.announcements; delete _D.myDelegations; delete _D.myAtt;
+        delete _D.myAttendance; delete _D.lastFetch;
+        delete _D.weekTasks; delete _D._ckWeekKey;
+        delete _D.teamChecklist; delete _D._ckTeamKey;
+        delete _D.histLogs; delete _D._ckHistKey;
+        delete _D._ckTodayKey;
+        window._tsAllTasks = null;
+        if (typeof _teamAttData !== 'undefined') _teamAttData = null;
+        if (typeof _lcClear === 'function') _lcClear();
+        if (typeof _rcClear === 'function') _rcClear(true);
+      } catch (e) { }
+
+      _gas('forceRefreshPortalCache', [], function (res) {
+        if (btn) {
+          btn.disabled = false;
+          if (ico) ico.className = 'fas fa-cloud-arrow-down';
+        }
+        if (res && res.firebase_sync) {
+          var msg = '✓ Cache cleared + Firebase updated';
+          if (res.counts) {
+            msg += ' · att ' + (res.counts.attendance || 0) +
+              ', tasks ' + (res.counts.checklistToday || 0);
+          }
+          _toast(msg, 'ok');
+        } else {
+          _toast(
+            'GAS cache cleared; Firebase sync issue: ' +
+            ((res && res.sync_error) || 'check VERCEL_SYNC_URL / SYNC_SECRET'),
+            'warn'
+          );
+        }
+        // Reload current view with fresh data
+        var cur = window._curView || 'dash';
+        setTimeout(function () {
+          if (typeof _loadV === 'function') _loadV(cur);
+        }, 400);
+      }, function (e) {
+        if (btn) {
+          btn.disabled = false;
+          if (ico) ico.className = 'fas fa-cloud-arrow-down';
+        }
+        _toast((e && e.message) || 'Cache refresh failed', 'err');
+      });
     }
 
 
@@ -5281,8 +5451,8 @@
         '<div id="tamBulkBar" style="display:none;align-items:center;gap:8px;margin-bottom:12px;padding:10px 14px;background:var(--Pl);border-radius:10px;border:1px solid var(--bdr2)">' +
         '<i class="fas fa-bolt" style="color:var(--P)"></i>' +
         '<span id="tamBulkLbl" style="font-size:13px;font-weight:700;color:var(--P);flex:1"></span>' +
-        '<input type="time" id="tamBulkIn"  value="' + curTime + '" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--bdr2);background:var(--bg);font-size:12px;color:var(--tx)">' +
-        '<input type="time" id="tamBulkOut" placeholder="Out (opt)" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--bdr2);background:var(--bg);font-size:12px;color:var(--tx)">' +
+'<input type="time" id="tamBulkIn"  value="' + (_teamAttDate === _today() ? _nowTime() : '') + '" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--bdr2);background:var(--bg);font-size:12px;color:var(--tx)">' +
+        '<input type="time" id="tamBulkOut" value="" placeholder="Out (opt)" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--bdr2);background:var(--bg);font-size:12px;color:var(--tx)">' +
         '<button onclick="_tamMarkAll()" style="padding:6px 14px;border-radius:8px;background:var(--P);color:#fff;font-size:12px;font-weight:800;border:none;cursor:pointer;white-space:nowrap"><i class="fas fa-check-double"></i> Mark All Present</button>' +
         '</div>' +
 
@@ -5384,7 +5554,15 @@
         return;
       }
 
-      var curTime = _nowTime();
+      // var curTime = _nowTime();
+
+              // Only auto-fill current clock time when marking TODAY.
+      // Past/future dates: leave OUT blank so manager types real time (no 02:58 junk).
+      var isToday = (_teamAttDate === _today());
+      var defaultIn = isToday ? _nowTime() : '';
+      var defaultOut = isToday ? _nowTime() : '';  // past date → empty OUT
+
+        
 
       // Group by dept
       var byDept = {}, deptOrder = [];
@@ -5441,8 +5619,7 @@
               ? '<span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:800;background:#fef3c7;color:#d97706">OUT pending</span>' +
               (r.check_in ? '<span style="font-size:12px;font-weight:700;color:var(--G)"><i class="fas fa-arrow-right-to-bracket"></i> ' + _esc(r.check_in) + '</span>' : '') +
               '<input type="hidden" id="ti_' + r.emp_id + '" value="' + _esc(r.check_in || '') + '">' +
-              '<input type="time" id="to_' + r.emp_id + '" value="' + curTime + '" class="tam-time" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx);min-width:100px">' +
-              '<select id="st_' + r.emp_id + '" class="tam-sel" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx)">' +
+              '<input type="time" id="to_' + r.emp_id + '" value="' + defaultOut + '" class="tam-time" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx);min-width:100px" placeholder="HH:mm">' +              '<select id="st_' + r.emp_id + '" class="tam-sel" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx)">' +
               '<option value="P"' + (r.status === 'P' || r.status === 'Present' ? ' selected' : '') + '>Present</option>' +
               '<option value="HD"' + (r.status === 'HD' || r.status === 'Half Day' ? ' selected' : '') + '>Half Day</option>' +
               '<option value="A"' + (r.status === 'A' || r.status === 'Absent' ? ' selected' : '') + '>Absent</option>' +
@@ -5450,8 +5627,8 @@
               '<option value="PTO"' + (r.status === 'PTO' ? ' selected' : '') + '>PTO</option>' +
               '</select>' +
               '<button id="mb_' + r.emp_id + '" class="tam-btn" onclick="_tamMark1(\'' + _esc(r.emp_id) + '\',\'' + _esc(r.name) + '\',\'' + _esc(d) + '\')" style="padding:6px 14px;border-radius:8px;background:#d97706;color:#fff;font-size:12px;font-weight:800;border:none;cursor:pointer;white-space:nowrap"><i class="fas fa-sign-out-alt"></i> Mark OUT</button>'
-              : '<input type="time" id="ti_' + r.emp_id + '" value="' + curTime + '" class="tam-time" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx);min-width:100px" title="Check-in">' +
-              '<input type="time" id="to_' + r.emp_id + '" class="tam-time" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx);min-width:100px" title="Check-out">' +
+              : '<input type="time" id="ti_' + r.emp_id + '" value="' + defaultIn + '" class="tam-time" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx);min-width:100px" title="Check-in">' +   
+              '<input type="time" id="to_' + r.emp_id + '" value="" class="tam-time" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx);min-width:100px" title="Check-out (optional)">' +
               '<select id="st_' + r.emp_id + '" class="tam-sel" style="padding:5px 8px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg);font-size:12px;color:var(--tx)">' +
               '<option value="P">Present</option><option value="HD">Half Day</option><option value="A">Absent</option><option value="WO">Week Off</option><option value="PTO">PTO</option>' +
               '</select>' +
@@ -5533,6 +5710,20 @@
       var inT = (document.getElementById('ti_' + empId) || {}).value || '';
       var outT = (document.getElementById('to_' + empId) || {}).value || '';
       var st = (document.getElementById('st_' + empId) || {}).value || 'P';
+      if (inT && outT) {
+        var a = inT.split(':');
+        var b = outT.split(':');
+        var inMins = parseInt(a[0], 10) * 60 + parseInt(a[1], 10);
+        var outMins = parseInt(b[0], 10) * 60 + parseInt(b[1], 10);
+        if (!isNaN(inMins) && !isNaN(outMins) && outMins <= inMins) {
+          _toast('OUT time IN se baad hona chahiye (' + inT + '). OUT theek karo.', 'warn');
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-sign-out-alt"></i> Mark OUT';
+          }
+          return;
+        }
+      }
       _toast('Marking ' + empName + '…', 'info');
       _gas('markStaffAttendance', [[{
         emp_id: empId, emp_name: empName, dept: dept,
@@ -7215,7 +7406,7 @@
 
         '</div>' +
         '<div style="padding:14px 20px;border-top:1px solid var(--bdr)">' +
-        '<div style="font-size:10px;color:var(--tx3);font-weight:600">Joolry Daily &nbsp;·&nbsp; &copy; 2026 Joolry</div>' +
+        '<div style="font-size:10px;color:var(--tx3);font-weight:600">KBN Designs &nbsp;·&nbsp; &copy; 2026 KB Designs</div>' +
         '</div>';
 
       document.body.appendChild(panel);
@@ -8164,7 +8355,7 @@
        Stored in localStorage so they only show once
     ══════════════════════════════════════════════════════════ */
     var _tips = [
-      {id: 't1', title: 'Welcome to Joolry Daily!', body: 'Use the sidebar to navigate between modules. Your current section is highlighted.', ico: 'fa-hand-wave'},
+      {id: 't1', title: 'Welcome to KBN TaskApp!', body: 'Use the sidebar to navigate between modules. Your current section is highlighted.', ico: 'fa-hand-wave'},
       {id: 't2', title: 'Quick Search', body: 'Press ⌘K (Mac) or Ctrl+K (Windows) to open the global search and jump to any page or employee instantly.', ico: 'fa-magnifying-glass'},
       {id: 't3', title: 'Keyboard Shortcuts', body: 'Press ? anywhere in the app to see all available keyboard shortcuts.', ico: 'fa-keyboard'},
       {id: 't4', title: 'Dark Mode', body: 'Toggle dark mode using the moon icon in the top right corner. Your preference is saved automatically.', ico: 'fa-moon'}
@@ -8210,8 +8401,8 @@
       // Show first onboarding tip 2 seconds after login (triggered from _bootApp)
       // _showNextTip is called from _bootApp after login
 
-      console.log('[Joolry Daily v3.0] Initialized. Ready for login.');
-      console.log('[Joolry Daily v3.0] Press ? for keyboard shortcuts, ⌘K for search.');
+      console.log('[KBN TaskApp v3.0] Initialized. Ready for login.');
+      console.log('[KBN TaskApp v3.0] Press ? for keyboard shortcuts, ⌘K for search.');
     }());
 
     /* ══════════════════════════════════════════════════════════════════════
@@ -11135,7 +11326,7 @@
         var sbRl = document.getElementById('sbRole');
         var nm = (u.name && String(u.name).trim() && u.name !== 'User' && u.name !== 'Staff')
           ? u.name
-          : (sbNm && sbNm.textContent && sbNm.textContent.trim() && sbNm.textContent !== 'Joolry Staff' ? sbNm.textContent.trim() : '');
+          : (sbNm && sbNm.textContent && sbNm.textContent.trim() && sbNm.textContent !== 'KBN Staff' ? sbNm.textContent.trim() : '');
         if (!nm) nm = (u.email || 'Staff Member');
         var role = (u.role || 'STAFF');
         var dept = (u.dept || '');
@@ -12136,9 +12327,9 @@
         document.body.classList.add('dense');
       }
 
-      console.log('[Joolry Daily v3.0] Initialized. Ready for login.');
-      console.log('[Joolry Daily v3.0] Press ? for keyboard shortcuts, ⌘K for search.');
-      console.log('[Joolry Daily v3.0] Navigation routes:', _navRoutes.length, 'views registered.');
+      console.log('[KBN TaskApp v3.0] Initialized. Ready for login.');
+      console.log('[KBN TaskApp v3.0] Press ? for keyboard shortcuts, ⌘K for search.');
+      console.log('[KBN TaskApp v3.0] Navigation routes:', _navRoutes.length, 'views registered.');
     }());
 
     /* ══════════════════════════════════════════════════════════════════════
